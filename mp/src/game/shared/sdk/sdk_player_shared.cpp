@@ -1002,6 +1002,7 @@ ConVar  sdk_dive_gravity_adrenaline("sdk_dive_gravity_adrenaline", "0.6", FCVAR_
 
 ConVar  da_acro_dive_arc ("da_acro_dive_arc", "90", FCVAR_NOTIFY|FCVAR_REPLICATED|FCVAR_CHEAT|FCVAR_DEVELOPMENTONLY);
 
+
 Vector CSDKPlayerShared::StartDiving()
 {
 	if (!CanDive())
@@ -1053,7 +1054,7 @@ Vector CSDKPlayerShared::StartDiving()
 	float flRatio = sdk_dive_height_adrenaline.GetFloat() / flDiveHeight;
 	float flModifier = (flRatio - 1)/2;
 
-	flDiveHeight = ModifySkillValue (flDiveHeight, flModifier, SKILL_ATHLETIC);
+	flDiveHeight = ModifySkillValue(flDiveHeight, flModifier, SKILL_ATHLETIC);
 
 	flRatio = sdk_dive_gravity_adrenaline.GetFloat() / sdk_dive_gravity.GetFloat();
 	flModifier = (flRatio - 1)/2;
@@ -1062,7 +1063,7 @@ Vector CSDKPlayerShared::StartDiving()
 
 	ConVarRef sdk_dive_speed("sdk_dive_speed");
 	flRatio = sdk_dive_speed_adrenaline.GetFloat() / sdk_dive_speed.GetFloat();
-	flModifier = (flRatio - 1)/2;
+	flModifier = (flRatio - 1) / 2;
 
 	return m_vecDiveDirection.Get() * (ModifySkillValue(sdk_dive_speed.GetFloat(), flModifier, SKILL_ATHLETIC) * flSpeedFraction) + Vector(0, 0, flDiveHeight);
 }

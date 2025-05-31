@@ -2504,7 +2504,7 @@ static bool ShouldHitFuncIgnoreBreakables(IHandleEntity *pHandleEntity, int cont
 	if (pEntity->GetHealth() == 0)
 		return true;
 
-	return false;
+	return false; 
 }
 
 bool CSDKGameMovement::CheckMantel()

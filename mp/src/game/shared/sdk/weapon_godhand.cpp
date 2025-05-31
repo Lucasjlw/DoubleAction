@@ -1,68 +1,74 @@
-//========= Copyright © 1996-2008, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
-//=====================================================================================//
+//=============================================================================//
+
 
 #include "cbase.h"
 #include "weapon_sdkbase.h"
 #include "sdk_weapon_melee.h"
+#include "igamemovement.h"
+#include "in_buttons.h"
 
-#if defined( CLIENT_DLL )
-
-	#define CWeaponBrawl C_WeaponBrawl
-	#include "c_sdk_player.h"
-
+#ifdef CLIENT_DLL
+#define CWeaponGodhand C_WeaponGodhand
+#include "c_sdk_player.h"
 #else
-	#include "sdk_player.h"
-
-
-	#include "ilagcompensationmanager.h"
-
+#include "sdk_player.h"
+#include "ilagcompensationmanager.h"
 #endif
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-class CWeaponBrawl : public CWeaponSDKMelee
+extern CMoveData* g_pMoveData;
+
+//extern ConVar sk_godhand_charge_time;
+
+//-----------------------------------------------------------------------------
+// C_GodHand
+//-----------------------------------------------------------------------------
+class CWeaponGodhand : public CWeaponSDKMelee
 {
 public:
-	DECLARE_CLASS( CWeaponBrawl, CWeaponSDKMelee );
-	DECLARE_NETWORKCLASS(); 
+	DECLARE_CLASS(CWeaponGodhand, CWeaponSDKMelee);
+	DECLARE_NETWORKCLASS();
 	DECLARE_PREDICTABLE();
 	DECLARE_ACTTABLE();
-	
-	CWeaponBrawl();
 
-	virtual SDKWeaponID GetWeaponID( void ) const		{	return SDK_WEAPON_BRAWL; }
-	virtual float	GetRange( void )					{	return	64.0f;	}	//Tony; let the crowbar swing further.
-	virtual bool CanWeaponBeDropped() const				{	return false; }
+
+	void			Precache();
+	void			ItemPostFrame();
+	void			Swing();
+	void            HandleAttackMovement();
+	void            PrimaryAttack();
+	//Activity		GetPrimaryAttackActivity();
+
+
+	CWeaponGodhand() {
+		m_bIsHoldingPrimaryAttack = false;
+		AddEffects(EF_NODRAW);
+	}
 
 private:
-
-	CWeaponBrawl( const CWeaponBrawl & );
+	bool m_bIsHoldingPrimaryAttack;
+	CWeaponGodhand(const CWeaponGodhand&);
 };
 
-IMPLEMENT_NETWORKCLASS_ALIASED( WeaponBrawl, DT_WeaponBrawl )
 
-BEGIN_NETWORK_TABLE( CWeaponBrawl, DT_WeaponBrawl )
+IMPLEMENT_NETWORKCLASS_ALIASED(WeaponGodhand, DT_GodHand)
+
+BEGIN_NETWORK_TABLE(CWeaponGodhand, DT_GodHand)
 END_NETWORK_TABLE()
 
-BEGIN_PREDICTION_DATA( CWeaponBrawl )
+BEGIN_PREDICTION_DATA(CWeaponGodhand)
 END_PREDICTION_DATA()
 
-LINK_ENTITY_TO_CLASS( weapon_brawl, CWeaponBrawl );
-PRECACHE_WEAPON_REGISTER( weapon_brawl );
+LINK_ENTITY_TO_CLASS(weapon_godhand, CWeaponGodhand);
+PRECACHE_WEAPON_REGISTER(weapon_godhand);
 
-
-
-CWeaponBrawl::CWeaponBrawl()
-{
-	AddEffects( EF_NODRAW );
-}
-
-//Tony; todo; add ACT_MP_PRONE* activities, so we have them.
-acttable_t CWeaponBrawl::m_acttable[] = 
+acttable_t CWeaponGodhand::m_acttable[] =
 {
 	{ ACT_DA_STAND_IDLE,				ACT_DA_STAND_IDLE,				false },
 	{ ACT_DA_WALK_IDLE,				ACT_DA_WALK_IDLE,				false },
@@ -107,5 +113,53 @@ acttable_t CWeaponBrawl::m_acttable[] =
 	{ ACT_DA_WALLFLIP,                 ACT_DA_WALLFLIP,               false },
 };
 
-IMPLEMENT_ACTTABLE( CWeaponBrawl );
+IMPLEMENT_ACTTABLE(CWeaponGodhand);
 
+void CWeaponGodhand::Precache() {
+	BaseClass::Precache();
+}
+
+void CWeaponGodhand::PrimaryAttack() {
+	if (!m_bIsHoldingPrimaryAttack) {
+		BaseClass::Swing();
+		HandleAttackMovement();
+	}
+}
+
+void CWeaponGodhand::ItemPostFrame(void)
+{
+	CBasePlayer* pOwner = ToBasePlayer(GetOwner());
+
+	if (pOwner == NULL)
+		return;
+
+	if (m_bIsHoldingPrimaryAttack)
+	{
+		if (pOwner->m_afButtonPressed & IN_USE)
+		{
+			m_bIsHoldingPrimaryAttack = false;
+		}
+	}
+	else
+	{
+		if (pOwner->m_afButtonPressed & IN_USE)
+		{
+			m_bIsHoldingPrimaryAttack = true;
+		}
+	}
+
+	BaseClass::ItemPostFrame();
+}
+
+void CWeaponGodhand::HandleAttackMovement() {
+	CSDKPlayer* pOwner = ToSDKPlayer(GetOwner());
+
+	if (pOwner == NULL)
+		return;
+
+	//Vector forward;
+	//pOwner->EyeVectors(&forward);
+
+	g_pMoveData->m_vecVelocity = pOwner->m_Shared.StartDiving();
+	pOwner->SetGravity(0.2);
+}

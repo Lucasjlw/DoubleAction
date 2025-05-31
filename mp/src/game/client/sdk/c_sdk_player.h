@@ -215,6 +215,7 @@ public:
 	bool HasSuperSlowMo() const { return m_bHasSuperSlowMo; }
 	int GetSlowMoType() const { return m_iSlowMoType; }
 
+
 	bool HasPlayerDied() const { return m_bHasPlayerDied; }
 
 	bool IsInThirdPerson() const;

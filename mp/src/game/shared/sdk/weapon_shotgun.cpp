@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -59,13 +59,23 @@ void CWeaponShotgun::PrimaryAttack()
 		m_iInSpecialReload = 0;
 }
 
+void CWeaponShotgun::SecondaryAttack()
+{
+	StartSwing(true, false);
+}
+
 void CWeaponShotgun::StartSwing(bool bIsSecondary, bool bIsStockAttack)
 {
-	BaseClass::StartSwing( bIsSecondary, bIsStockAttack );
+	BaseClass::StartSwing( bIsSecondary, bIsStockAttack, true );
+	m_flNextPrimaryAttack = GetCurrentTime() + 0.15; // Add a small delay between finishing reload and firing again
 }
 
 bool CWeaponShotgun::Reload()
 {
+	BaseClass::Reload();
+
+	return true;
+
 	CSDKPlayer *pPlayer = GetPlayerOwner();
 
 	if (pPlayer->GetAmmoCount( m_iPrimaryAmmoType ) <= 0 || m_iClip1 == GetMaxClip1())

@@ -170,6 +170,7 @@ typedef enum
 	// Other
 	SDK_WEAPON_GRENADE,
 	SDK_WEAPON_BRAWL,
+	SDK_WEAPON_GODHAND,
 	WEAPON_MAX,		// number of weapons weapon index
 
 } SDKWeaponID;
