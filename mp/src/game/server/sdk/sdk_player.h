@@ -182,6 +182,8 @@ public:
 
 	float GetDKRatio(float flMin = 0.7f, float flMax = 2, bool bDampen = true) const;
 
+	void RevealEnemy(CSDKPlayer* pEnemy);
+
 	CWeaponSDKBase *FindWeapon (SDKWeaponID id);
 	CWeaponSDKBase* FindAnyWeaponButBrawl();
 
@@ -465,6 +467,8 @@ public:
 	virtual void		CommitSuicide( bool bExplode = false, bool bForce = false );
 	virtual bool		SuicideAllowed( void ) { return GetCurrentTime() > m_flNextSuicideTime; }
 
+	void ResetRegenCooldown();
+
 private:
 	// Last usercmd we shot a bullet on.
 	int m_iLastWeaponFireUsercmd;
@@ -571,6 +575,11 @@ public:
 
 	CNetworkHandle(CBriefcase, m_hBriefcase);
 	CNetworkVar( int, m_iRaceWaypoint ); // What's the highest waypoint I've gotten to?
+
+	CNetworkVar(float, m_flWantedMeterRemaining);
+
+	float m_flLastBouncerAutoActivate = 0;
+	float m_flLastReflexesAutoActivate = 0;
 
 	bool m_bGotWorthIt;
 

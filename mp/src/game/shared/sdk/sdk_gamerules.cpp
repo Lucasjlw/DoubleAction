@@ -1018,6 +1018,36 @@ void CSDKGameRules::Think()
 
 	if (m_eCurrentMiniObjective)
 		MaintainMiniObjective();
+
+	if (CSDKPlayer* pPlayer = ToSDKPlayer(UTIL_PlayerByIndex(m_iNextPlayerVisibilityCheck)))
+	{
+		for (int k = 1; k < gpGlobals->maxClients; k++)
+		{
+			if (m_iNextPlayerVisibilityCheck == k)
+			{
+				continue;
+			}
+
+			CSDKPlayer* pOther = ToSDKPlayer(UTIL_PlayerByIndex(k));
+			if (!pOther)
+			{
+				continue;
+			}
+
+			trace_t tr;
+			UTIL_TraceLine(pPlayer->EyePosition(), pOther->WorldSpaceCenter(), MASK_BLOCKLOS, pPlayer, COLLISION_GROUP_NONE, &tr);
+
+			if (tr.fraction < 1.0f)
+			{
+				continue;
+			}
+
+			pPlayer->ResetRegenCooldown();
+			pOther->ResetRegenCooldown();
+		}
+	}
+
+	m_iNextPlayerVisibilityCheck = (m_iNextPlayerVisibilityCheck + 1) % MAX_PLAYERS;
 }
 
 // The bots do their processing after physics simulation etc so their visibility checks don't recompute
@@ -1848,9 +1878,12 @@ void CSDKGameRules::HealWanted(float flHealAmount)
 	GetBountyPlayer()->TakeHealth(flHealAmount, 0);
 }
 
+static ConVar da_wanted_meter_refund_on_kill("da_wanted_meter_refund_on_kill", "10", FCVAR_REPLICATED | FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY);
 
 void CSDKGameRules::PlayerKilled( CBasePlayer *pVictim, const CTakeDamageInfo &info )
 {
+	CSDKPlayer* pSDKVictim = ToSDKPlayer(pVictim);
+
 	if (pVictim && pVictim == GetBountyPlayer())
 	{
 		CSDKPlayer::SendBroadcastSound("MiniObjective.BountyKilled");
@@ -1878,19 +1911,48 @@ void CSDKGameRules::PlayerKilled( CBasePlayer *pVictim, const CTakeDamageInfo &i
 	{
 		HealWanted(25);
 
+		CSDKPlayer* pAttacker = ToSDKPlayer(info.GetAttacker());
+
+		pAttacker->m_flWantedMeterRemaining += da_wanted_meter_refund_on_kill.GetFloat();
+
 		// achievement "Somebody Stop Me" - 25 kill streak as wanted
-		CSDKPlayer* attacker = ToSDKPlayer(info.GetAttacker());
-		attacker->m_nNumKillsThisWanted++;
-		if (attacker->m_nNumKillsThisWanted > 24)
-			DA_ApproachAchievement("SOMEBODY_STOP_ME", attacker->GetUserID());
-		if (attacker->m_nNumKillsThisWanted > 49)
-			DA_ApproachAchievement("PENGUIN", attacker->GetUserID());
+		pAttacker->m_nNumKillsThisWanted++;
+		if (pAttacker->m_nNumKillsThisWanted > 24)
+			DA_ApproachAchievement("SOMEBODY_STOP_ME", pAttacker->GetUserID());
+		if (pAttacker->m_nNumKillsThisWanted > 49)
+			DA_ApproachAchievement("PENGUIN", pAttacker->GetUserID());
 	}
 
 	CSDKPlayer* pLeader = GetLeader();
 
-	RemovePlayerFromLeaders(m_ahWaypoint1RaceLeaders, ToSDKPlayer(pVictim));
-	RemovePlayerFromLeaders(m_ahWaypoint2RaceLeaders, ToSDKPlayer(pVictim));
+	if (pSDKVictim->m_iRaceWaypoint == 1)
+	{
+		RemovePlayerFromLeaders(m_ahWaypoint1RaceLeaders, pSDKVictim);
+
+		if (pVictim == info.GetAttacker())
+		{
+			pSDKVictim->m_iRaceWaypoint = 0;
+		}
+		else
+		{
+			WaypointLeadersPush(m_ahWaypoint1RaceLeaders, pSDKVictim);
+		}
+	}
+
+	if (pSDKVictim->m_iRaceWaypoint == 2)
+	{
+		RemovePlayerFromLeaders(m_ahWaypoint2RaceLeaders, pSDKVictim);
+
+		if (pVictim == info.GetAttacker())
+		{
+			pSDKVictim->m_iRaceWaypoint = 1;
+			WaypointLeadersPush(m_ahWaypoint1RaceLeaders, pSDKVictim);
+		}
+		else
+		{
+			WaypointLeadersPush(m_ahWaypoint2RaceLeaders, pSDKVictim);
+		}
+	}
 
 	CSDKPlayer* pNewLeader = GetLeader();
 
@@ -2589,6 +2651,8 @@ bool CSDKGameRules::SetupMiniObjective_Bounty()
 
 	m_hBountyPlayer = pChosen;
 
+	m_hBountyPlayer->m_flWantedMeterRemaining = 100;
+
 	GiveMiniObjectiveRewardPlayer(pChosen);
 
 	if (IsTeamplay())
@@ -2637,6 +2701,14 @@ void CSDKGameRules::MaintainMiniObjective_Bounty()
 
 	if (!m_hBountyPlayer->IsAlive())
 	{
+		CleanupMiniObjective();
+		return;
+	}
+
+	if (m_hBountyPlayer->m_flWantedMeterRemaining == 0)
+	{
+		CSDKPlayer::SendBroadcastNotice(NOTICE_BOUNTY_WON);
+		GiveMiniObjectiveRewardPlayer(m_hBountyPlayer);
 		CleanupMiniObjective();
 		return;
 	}
@@ -3292,7 +3364,7 @@ void RegisterVoteIssues()
 	//new CTeamplayModeVoteIssue();
 	new CNextMapVoteIssue();
 	new CChangelevelVoteIssue();
-	new CKickPlayerVoteIssue();
+	//new CKickPlayerVoteIssue();
 	new CAddBotVoteIssue();
 }
 #endif

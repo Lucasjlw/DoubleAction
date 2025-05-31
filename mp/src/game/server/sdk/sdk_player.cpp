@@ -102,12 +102,19 @@ PRECACHE_REGISTER(player);
 // CSDKPlayerShared Data Tables
 //=============================
 
+BEGIN_SEND_TABLE_NOBASE(CRevealedEnemy, DT_RevealedEnemy)
+	SendPropInt(SENDINFO(m_iEnemyClientIndex)),
+	SendPropTime(SENDINFO(m_flRevealTime)),
+	SendPropFloat(SENDINFO(m_flRevealDuration)),
+END_SEND_TABLE()
+
 // specific to the local player
 BEGIN_SEND_TABLE_NOBASE( CSDKPlayerShared, DT_SDKSharedLocalPlayerExclusive )
 #if defined ( SDK_USE_PLAYERCLASSES )
 	SendPropInt( SENDINFO( m_iPlayerClass), 4 ),
 	SendPropInt( SENDINFO( m_iDesiredPlayerClass ), 4 ),
 #endif
+	SendPropArray3(SENDINFO_ARRAY3(m_aRevealedEnemies), SendPropDataTable(SENDINFO_DT(m_aRevealedEnemies), &REFERENCE_SEND_TABLE(DT_RevealedEnemy))),
 END_SEND_TABLE()
 
 BEGIN_SEND_TABLE_NOBASE( CSDKPlayerShared, DT_SDKPlayerShared )
@@ -260,6 +267,8 @@ IMPLEMENT_SERVERCLASS_ST( CSDKPlayer, DT_SDKPlayer )
 
 	SendPropEHandle( SENDINFO( m_hBriefcase ) ),
 	SendPropInt( SENDINFO( m_iRaceWaypoint ) ),
+
+	SendPropFloat(SENDINFO(m_flWantedMeterRemaining)),
 
 	SendPropBool( SENDINFO( m_bCoderHacks ) ),
 	SendPropInt( SENDINFO( m_nCoderHacksButtons ), 32, SPROP_UNSIGNED ),
@@ -732,9 +741,10 @@ inline bool CSDKPlayer::IsReloading( void ) const
 	return false;
 }
 
-ConVar da_regenamount( "da_regenamount", "30", FCVAR_CHEAT|FCVAR_DEVELOPMENTONLY, "How much health does the player regenerate each tick?" );
+ConVar da_regenamount( "da_regenamount", "100", FCVAR_CHEAT|FCVAR_DEVELOPMENTONLY, "How much health does the player regenerate each tick?" );
 ConVar da_decayamount( "da_decayamount", "1", FCVAR_CHEAT|FCVAR_DEVELOPMENTONLY, "How much health does the player decay each tick, when total health is greater than max?" );
 ConVar da_regenamount_secondwind( "da_regenamount_secondwind", "10", FCVAR_CHEAT|FCVAR_DEVELOPMENTONLY, "How much health does a player with the second wind style skill regenerate each tick?" );
+ConVar da_regenrate("da_regenrate", "0.05", FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY, "Once health starts regen, how long between ticks?");
 
 void CSDKPlayer::PreThink(void)
 {
@@ -759,30 +769,13 @@ void CSDKPlayer::PreThink(void)
 			m_flNextHealthDecay = m_flCurrentTime + 1;
 		}
 
-		if (m_flCurrentTime > m_flNextRegen)
-		{	// player has been out of battle for a while, regenerate their health
+		if (m_flCurrentTime > m_flNextRegen && GetHealth() < GetMaxHealth())
+		{
+			float flHealth = da_regenamount.GetFloat() * da_regenrate.GetFloat();
 
-			float flRatio = da_regenamount_secondwind.GetFloat()/da_regenamount.GetFloat();
-			float flModifier = (flRatio - 1)/2;
-			float flHealth = m_Shared.ModifySkillValue(da_regenamount.GetFloat(), flModifier, SKILL_RESILIENT);
+			TakeHealth(min(flHealth, GetMaxHealth() - GetHealth()), 0);
 
-			m_flNextRegen = m_flCurrentTime + 1;
-
-			// Heal up to 100% of the player's health.
-			int iMaxHealth = GetMaxHealth();
-
-			// if (IsStyleSkillActive(SKILL_RESILIENT))
-			// 	// If Resilient is active, heal up to 100%, which is actually 200 health
-			// 	iMaxHealth = GetMaxHealth();
-			// else if (m_Shared.m_iStyleSkill == SKILL_RESILIENT)
-			// 	// If it's passive heal to 100%
-			// 	iMaxHealth = GetMaxHealth();
-
-			int iHealthTaken = 0;
-			if (GetHealth() < iMaxHealth)
-				iHealthTaken = TakeHealth(min(flHealth, iMaxHealth - GetHealth()), 0);
-
-			UseStyleCharge(SKILL_RESILIENT, iHealthTaken/2);
+			m_flNextRegen = m_flCurrentTime + da_regenrate.GetFloat();
 		}
 
 		if (m_Shared.IsSuperFalling() && !m_Shared.IsDiving())
@@ -852,6 +845,7 @@ void CSDKPlayer::PreThink(void)
 }
 
 ConVar sv_drawserverhitbox("sv_drawserverhitbox", "0", FCVAR_CHEAT|FCVAR_REPLICATED, "Shows server's hitbox representation." );
+ConVar da_wanted_meter_decay("da_wanted_meter_decay", "3", FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY, "How fast does the wanted skill meter decay in meter per second?");
 
 void CSDKPlayer::PostThink()
 {
@@ -897,6 +891,8 @@ void CSDKPlayer::PostThink()
 
 	if ( sv_drawserverhitbox.GetBool() )
 		DrawServerHitboxes( 2*gpGlobals->frametime, true );
+
+	m_flWantedMeterRemaining = UTIL_Approach(0, m_flWantedMeterRemaining, da_wanted_meter_decay.GetFloat() * gpGlobals->frametime * GetSlowMoMultiplier());
 
 	if (SDKGameRules()->CoderHacks())
 		m_nCoderHacksButtons = m_nButtons;
@@ -1185,13 +1181,6 @@ void CSDKPlayer::Spawn()
 	m_iCurrentStreak = 0;
 	m_flNextSuicideTime = 0;
 
-	// instead of setting this to zero at spawn we'll just decrement it
-	// so that when a player dies in rat race they are only set back one
-	// ratrace waypoint, not the whole hog
-	m_iRaceWaypoint --;
-	if(m_iRaceWaypoint < 0)
-		m_iRaceWaypoint = 0;
-
 	m_Shared.EndDive();
 	m_Shared.EndRoll();
 	m_Shared.EndSlide(true);
@@ -1232,6 +1221,8 @@ void CSDKPlayer::Spawn()
 	// you always die after a superfall so this is a safe place to reset this number
 	m_nNumEnemiesKilledThisSuperfall = 0;
 
+	m_flLastReflexesAutoActivate = 0;
+	m_flLastBouncerAutoActivate = 0;
 }
 
 bool CSDKPlayer::SelectSpawnSpot( const char *pEntClassName, CBaseEntity* &pSpot )
@@ -1507,6 +1498,8 @@ int CSDKPlayer::OnTakeDamage( const CTakeDamageInfo &inputInfo )
 		pSDKAttacker->ActivateSuperfallSlowMo();
 	}
 
+	flDamage = m_Shared.ModifySkillValue(flDamage, -0.2f, SKILL_BOUNCER);
+
 /*	if (IsStyleSkillActive(SKILL_IMPERVIOUS))
 	{
 		UseStyleCharge(flDamage * 0.2f);
@@ -1572,7 +1565,7 @@ int CSDKPlayer::OnTakeDamage( const CTakeDamageInfo &inputInfo )
 			float flDot = DotProduct( vecForward, vecBack );
 			if ( flDot < 0.0f )
 			{
-				flDamage *= 0.15f;
+				flDamage *= 0.85f;
 			}
 		}
 
@@ -1714,17 +1707,27 @@ int CSDKPlayer::OnTakeDamage( const CTakeDamageInfo &inputInfo )
 	}
 }
 
+ConVar da_regendelay("da_regendelay", "4", FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY, "How long after taking damage before health starts regenerating?");
+ConVar da_reflexes_auto_activate_cooldown("da_reflexes_auto_activate_cooldown", "5", FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY, "Reflexes auto slomo activate cooldown");
+
 int CSDKPlayer::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 {
 	// set damage type sustained
 	m_bitsDamageType |= info.GetDamageType();
+
+	if (m_Shared.m_iStyleSkill == SKILL_REFLEXES && (info.GetDamageType() & DMG_BULLET) && GetHealth() >= 100 && m_flCurrentTime > m_flLastReflexesAutoActivate + da_reflexes_auto_activate_cooldown.GetFloat())
+	{
+		GiveSlowMo(1);
+		ActivateSlowMo();
+		m_flLastReflexesAutoActivate = m_flCurrentTime;
+	}
 
 	if ( !CBaseCombatCharacter::OnTakeDamage_Alive( info ) )
 		return 0;
 
 	// fire global game event
 
-	if (info.GetAttacker() && info.GetAttacker()->IsPlayer() && info.GetDamageType() == DMG_BULLET)
+	if (info.GetAttacker() && info.GetAttacker()->IsPlayer() && (info.GetDamageType() & DMG_BULLET))
 		ReadyWeapon();
 
 	IGameEvent * event = gameeventmanager->CreateEvent( "player_hurt" );
@@ -1806,18 +1809,31 @@ int CSDKPlayer::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 		// we'll keep track of this in case the dive kills him, but not if we're on the same team! 
 		if ( SDKGameRules()->PlayerRelationship(this, pAttackerSDK) != GR_TEAMMATE )
 			pAttackerSDK->m_bDamagedEnemyDuringSuperFall = true;
+
+		if (LastHitGroup() == HITGROUP_HEAD && pAttackerSDK->m_Shared.m_iStyleSkill == SKILL_MARKSMAN)
+		{
+			CWeaponSDKBase* pWeaponSDKBase = pAttackerSDK->GetActiveSDKWeapon();
+			if (pWeaponSDKBase)
+			{
+				pWeaponSDKBase->m_iClip1 = min(pWeaponSDKBase->Clip1() + pWeaponSDKBase->GetMaxClip1() / 2, pWeaponSDKBase->GetMaxClip1());
+			}
+		}
+
+		if (IsAlive() && (info.GetDamageType() & DMG_BLAST) && pAttackerSDK->m_Shared.m_iStyleSkill == SKILL_TROLL && pAttackerSDK != this)
+		{
+			FreezePlayer(0.3f, 0.5f);
+			pAttackerSDK->RevealEnemy(this);
+		}
 	}
 
-	// no matter what, set our regen timer to 8 seconds
-	m_flNextRegen = m_flCurrentTime + 8;
-	// if (m_Shared.m_iStyleSkill != SKILL_RESILIENT)
-	// 	m_flNextRegen = m_flCurrentTime + 10;
-	// else if (!IsStyleSkillActive())
-	// 	m_flNextRegen = m_flCurrentTime + 6;
-	// else
-	// 	m_flNextRegen = m_flCurrentTime + 4;
+	ResetRegenCooldown();
 
 	return 1;
+}
+
+void CSDKPlayer::ResetRegenCooldown()
+{
+	m_flNextRegen = m_flCurrentTime + da_regendelay.GetFloat();
 }
 
 CWeaponSDKBase* CSDKPlayer::FindAnyWeaponButBrawl()
@@ -2020,6 +2036,12 @@ void CSDKPlayer::Event_Killed( const CTakeDamageInfo &info )
 
 	m_bHasPlayerDied = true;
 
+	if (pAttacker && pAttacker->IsPlayer() && pAttacker != this)
+	{
+		CSDKPlayer* pSDKAttacker = ToSDKPlayer(pAttacker);
+		pSDKAttacker->m_flLastBouncerAutoActivate = 0.0f;
+	}
+
 	SDKGameRules()->PlayerSlowMoUpdate(this);
 }
 
@@ -2067,21 +2089,32 @@ void CSDKPlayer::AwardStylePoints(CSDKPlayer* pVictim, bool bKilledVictim, const
 		flPoints = RemapValClamped(info.GetDamage(), 0, 100, 0, da_stylemeteractivationcost.GetFloat()/4);
 	}
 
+	float flMultiplier = 0.0f;
+
 	if (m_Shared.IsAimedIn())
-		flPoints *= 1.2f;
+	{
+		flMultiplier += 0.1f;
+	}
 
 	if (m_iSlowMoType != SLOWMO_NONE)
-		flPoints *= 1.3f;
+	{
+		flMultiplier += 0.3f;
+	}
 
 	float flDistance = GetAbsOrigin().DistTo(pVictim->GetAbsOrigin());
-	flPoints *= RemapValClamped(flDistance, 800, 1200, 1, 1.5f);
+	flMultiplier += RemapValClamped(flDistance, 800, 1200, 0, 0.5f);
 
 	// the weapon that did the killing
 	CWeaponSDKBase* pWeapon = dynamic_cast<CWeaponSDKBase*>(info.GetWeapon());
 	CSDKWeaponInfo* pWeaponInfo = pWeapon?CSDKWeaponInfo::GetWeaponInfo(pWeapon->GetWeaponID()):NULL;
 
 	if (pWeaponInfo)
-		flPoints *= pWeaponInfo->m_flStyleMultiplier;
+	{
+		flMultiplier += 1 - pWeaponInfo->m_flStyleMultiplier;
+	}
+
+	flPoints *= 1 + flMultiplier;
+
 	Vector vecVictimForward;
 	pVictim->GetVectors(&vecVictimForward, NULL, NULL);
 
@@ -2249,16 +2282,16 @@ void CSDKPlayer::AwardStylePoints(CSDKPlayer* pVictim, bool bKilledVictim, const
 			if (info.GetDamageType() == DMG_CLUB)
 			{
 				if (bKilledVictim)
-					AddStylePoints(flPoints, STYLE_SOUND_KNOCKOUT, ANNOUNCEMENT_SLIDEPUNCH, STYLE_POINT_STYLISH);
+					AddStylePoints(flPoints*0.65f, STYLE_SOUND_KNOCKOUT, ANNOUNCEMENT_SLIDEPUNCH, STYLE_POINT_STYLISH);
 				else
-					AddStylePoints(flPoints, STYLE_SOUND_LARGE, ANNOUNCEMENT_SLIDEPUNCH, STYLE_POINT_LARGE);
+					AddStylePoints(flPoints*0.65f, STYLE_SOUND_LARGE, ANNOUNCEMENT_SLIDEPUNCH, STYLE_POINT_LARGE);
 			}
 			else
 			{
 				if (bKilledVictim)
-					AddStylePoints(flPoints, STYLE_SOUND_LARGE, ANNOUNCEMENT_SLIDE_KILL, STYLE_POINT_STYLISH);
+					AddStylePoints(flPoints*0.65f, STYLE_SOUND_LARGE, ANNOUNCEMENT_SLIDE_KILL, STYLE_POINT_STYLISH);
 				else
-					AddStylePoints(flPoints, STYLE_SOUND_SMALL, ANNOUNCEMENT_SLIDE, STYLE_POINT_LARGE);
+					AddStylePoints(flPoints*0.65f, STYLE_SOUND_SMALL, ANNOUNCEMENT_SLIDE, STYLE_POINT_LARGE);
 			}
 		}
 		else
@@ -4158,6 +4191,11 @@ void CSDKPlayer::AddStylePoints(float points, style_sound_t eStyle, announcement
 	if (SDKGameRules()->GetBountyPlayer() == this)
 		SDKGameRules()->HealWanted(points);
 
+	if (m_Shared.IsDiving() || m_Shared.IsSliding() || m_Shared.IsRolling() || m_Shared.IsSuperFalling() || m_Shared.IsWallFlipping() || m_Shared.IsManteling())
+	{
+		points = m_Shared.ModifySkillValue(points, 0.5, SKILL_ATHLETIC);
+	}
+
 	points *= GetDKRatio(0.7, 2, true);
 
 	m_flTotalStyle += points;
@@ -4751,6 +4789,23 @@ float CSDKPlayer::GetDKRatio(float flMin, float flMax, bool bDampen) const
 	}
 	else
 		return flDeathRatio;
+}
+
+void CSDKPlayer::RevealEnemy(CSDKPlayer* pEnemy)
+{
+	for (int k = 0; k < m_Shared.m_aRevealedEnemies.Count(); k++)
+	{
+		const CRevealedEnemy& oRevealedEnemyConst = m_Shared.m_aRevealedEnemies.Get(k);
+		if (!oRevealedEnemyConst.IsActive(GetCurrentTime()))
+		{
+			CRevealedEnemy& oRevealedEnemy = m_Shared.m_aRevealedEnemies.GetForModify(k);
+			oRevealedEnemy.m_iEnemyClientIndex = pEnemy->GetClientIndex();
+			oRevealedEnemy.m_flRevealTime = GetCurrentTime();
+			oRevealedEnemy.m_flRevealDuration = 1;
+
+			break;
+		}
+	}
 }
 
 void CC_ActivateSlowmo_f (void)

@@ -56,6 +56,11 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+bool CRevealedEnemy::IsActive(float flCurrentTime) const
+{
+	return flCurrentTime != 0 && flCurrentTime >= m_flRevealTime && flCurrentTime <= m_flRevealTime + m_flRevealDuration;
+}
+
 // Have to override all of ItemPostFrame to s/gpGlobals->curtime/GetCurrentTime()/
 void CSDKPlayer::ItemPostFrame()
 {
@@ -493,7 +498,9 @@ const Vector CSDKPlayer::GetPlayerMaxs( void ) const
 float CSDKPlayer::GetStylePoints()
 {
 	if (SDKGameRules()->GetBountyPlayer() == this)
-		return da_stylemeteractivationcost.GetFloat();
+	{
+		return m_flWantedMeterRemaining;
+	}
 
 	return m_flStylePoints;
 }
@@ -1681,9 +1688,9 @@ float CSDKPlayer::GetSlowMoMultiplier() const
 
 float CSDKPlayer::GetSlowMoGoal() const
 {
-	if (m_iSlowMoType == SLOWMO_STYLESKILL)
+	if (m_iSlowMoType == SLOWMO_ACTIVATED)
 		return 0.7f;
-	else if (m_iSlowMoType == SLOWMO_ACTIVATED)
+	else if (m_iSlowMoType == SLOWMO_STYLESKILL)
 		return 0.65f;
 	else if (m_iSlowMoType == SLOWMO_SUPERFALL)
 		return 0.65f;

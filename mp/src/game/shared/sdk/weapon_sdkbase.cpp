@@ -17,6 +17,7 @@
 #include "sdk_fx_shared.h"
 #include "sdk_gamerules.h"
 #include "da_viewmodel.h"
+#include "weapon_shotgun.h"
 
 #if defined( CLIENT_DLL )
 
@@ -522,6 +523,11 @@ void CWeaponSDKBase::StartSwing(bool bIsSecondary, bool bIsStockAttack)
 			m_flUnpauseFromSwingTime = GetCurrentTime() + flFireRate * 0.7f;
 	}
 
+	if (CWeaponShotgun* pShotgun = dynamic_cast<CWeaponShotgun*>(this))
+	{
+		pShotgun->CancelReload();
+	}
+
 	//Setup our next attack times
 	m_flNextSecondaryAttack = GetCurrentTime() + flFireRate;
 
@@ -664,6 +670,9 @@ Activity CWeaponSDKBase::ChooseIntersectionPointAndActivity( trace_t &hitTrace, 
 	return ACT_VM_HITCENTER;
 }
 
+ConVar da_bouncer_health_boost_cooldown("da_bouncer_health_boost_cooldown", "20", FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY);
+ConVar da_bouncer_health_boost("da_bouncer_health_boost", "25", FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY);
+
 void CWeaponSDKBase::Hit( trace_t &traceHit, bool bIsSecondary )
 {
 	CSDKPlayer *pPlayer = ToSDKPlayer( GetOwner() );
@@ -674,11 +683,11 @@ void CWeaponSDKBase::Hit( trace_t &traceHit, bool bIsSecondary )
 	CBaseEntity	*pHitEntity = traceHit.m_pEnt;
 
 	//Apply damage to a hit target
-	if ( pHitEntity != NULL )
+	if (pHitEntity != NULL)
 	{
 		Vector hitDirection;
-		pPlayer->EyeVectors( &hitDirection, NULL, NULL );
-		VectorNormalize( hitDirection );
+		pPlayer->EyeVectors(&hitDirection, NULL, NULL);
+		VectorNormalize(hitDirection);
 
 #ifndef CLIENT_DLL
 		float flDamage = GetMeleeDamage( bIsSecondary, ToSDKPlayer(pHitEntity) );
@@ -698,7 +707,20 @@ void CWeaponSDKBase::Hit( trace_t &traceHit, bool bIsSecondary )
 
 		// Now hit all triggers along the ray that... 
 		TraceAttackToTriggers( info, traceHit.startpos, traceHit.endpos, hitDirection );
+
+		CSDKPlayer* pSDKVictim = ToSDKPlayer(pHitEntity);
+		if (pSDKVictim && pPlayer->m_Shared.m_iStyleSkill == SKILL_BOUNCER)
+		{
+			pSDKVictim->FreezePlayer(0.5, 0.35f);
+
+			if (pSDKVictim->IsAlive() && pPlayer->m_flCurrentTime > pPlayer->m_flLastBouncerAutoActivate + da_bouncer_health_boost_cooldown.GetFloat())
+			{
+				pPlayer->TakeHealth(da_bouncer_health_boost.GetFloat(), 0);
+				pPlayer->m_flLastBouncerAutoActivate = pPlayer->m_flCurrentTime;
+			}
+		}
 #endif
+
 		CSoundParameters params;
 
 		if (traceHit.m_pEnt && traceHit.m_pEnt->IsPlayer() && GetParametersForSound( "Weapon_Brawl.PunchHit", params, NULL ) )
@@ -788,6 +810,12 @@ bool CWeaponSDKBase::ImpactWater( const Vector &start, const Vector &end )
 	return true;
 }
 
+float CWeaponSDKBase::GetMeleeRange()
+{
+	CSDKPlayer* pPlayer = ToSDKPlayer(GetOwner());
+	return pPlayer->m_Shared.ModifySkillValue(80, 0.2f, SKILL_BOUNCER);
+}
+
 float CWeaponSDKBase::GetMeleeDamage( bool bIsSecondary, CSDKPlayer* pVictim ) const
 {
 	CSDKPlayer *pPlayer = ToSDKPlayer( GetOwner() );
@@ -797,19 +825,24 @@ float CWeaponSDKBase::GetMeleeDamage( bool bIsSecondary, CSDKPlayer* pVictim ) c
 	bool bIsStockAttack = pPlayer && pPlayer->GetActiveSDKWeapon() && !pPlayer->GetActiveSDKWeapon()->IsMeleeWeapon();
 	if (bIsStockAttack)
 	{
-		// The heavier the damage the more it hurts.
+		// The heavier the weapon the more it hurts.
 		flDamage = RemapVal(GetWeight(), 7, 20, 25, 45);
 	}
-	else {
+	else
+	{
 		// Get the damage from the weapon script.
 		flDamage = bIsSecondary ? GetSDKWpnData().m_iSecondaryDamage : GetSDKWpnData().m_iDamage;
 	}
 
+	flDamage = pPlayer->m_Shared.ModifySkillValue(flDamage, 0.3f, SKILL_BOUNCER);
+
+	if (pPlayer->IsStyleSkillActive(SKILL_BOUNCER))
+	{
+		flDamage += 20;
+	}
+
 	if (pVictim)
 	{
-		if (pPlayer->IsStyleSkillActive(SKILL_BOUNCER))
-			flDamage += 20;
-
 		Vector vecForward;
 		AngleVectors(pVictim->EyeAngles(), &vecForward, NULL, NULL);
 
@@ -928,6 +961,11 @@ bool CWeaponSDKBase::MaintainGrenadeToss()
 	}
 
 	return true;
+}
+
+void CWeaponSDKBase::CancelGrenadeToss()
+{
+	m_flGrenadeThrowStart = 0;
 }
 
 float CWeaponSDKBase::GetGrenadeThrowWeaponHolsterTime() const
@@ -2048,6 +2086,17 @@ bool CWeaponSDKBase::Holster( CBaseCombatWeapon *pSwitchingTo )
 
 	// kill any think functions
 	SetThink(NULL);
+
+	CancelGrenadeToss();
+
+	if (CSDKPlayer* pPlayer = ToSDKPlayer(GetOwner()))
+	{
+		if (!pPlayer->IsInThirdPerson())
+		{
+			SetViewModel();
+			SetModel(GetViewModel());
+		}
+	}
 
 	// Send holster animation
 	SendWeaponAnim( ACT_VM_HOLSTER );

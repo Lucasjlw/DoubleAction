@@ -96,12 +96,13 @@ public:
 	virtual	void      ImpactEffect( trace_t &trace );
 	virtual bool      ImpactWater( const Vector &start, const Vector &end );
 
-	virtual float	GetMeleeRange( void )								{	return	80.0f;	}
+	virtual float	GetMeleeRange(void);
 	virtual float	GetMeleeDamage( bool bSecondary, CSDKPlayer* pVictim ) const;
 
 	virtual bool      IsThrowingGrenade() const { return m_flGrenadeThrowStart > 0; }
 	virtual void      StartGrenadeToss();
 	virtual bool      MaintainGrenadeToss();
+	virtual void      CancelGrenadeToss();
 	virtual float     GetGrenadeThrowStart() const { return m_flGrenadeThrowStart; }
 	virtual float     GetGrenadeThrowWeaponHolsterTime() const; // What time does the weapon finish holstering
 	virtual float     GetGrenadeThrowWeaponDeployTime() const;  // What time does the weapon start re-deploying
